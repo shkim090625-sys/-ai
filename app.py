@@ -688,7 +688,7 @@ for index, (key, display) in enumerate(
 
         st.markdown(f"**추천 조건:** {display}")
 
-                    st.markdown("### 실험 데이터")
+        st.markdown("### 실험 데이터")
 
                     for priority in priorities:
 
