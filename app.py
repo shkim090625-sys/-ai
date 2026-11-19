@@ -677,6 +677,7 @@ if st.button("통합 분석 및 추천하기", type="primary"):
             # 순위별 상세 분석
             st.subheader("추천 조건 상세 분석")
 
+
 for index, (key, display) in enumerate(
     recommendation_items
 ):
@@ -690,47 +691,52 @@ for index, (key, display) in enumerate(
 
         st.markdown("### 실험 데이터")
 
-                    for priority in priorities:
+        for priority in priorities:
 
-                        item = metric_data[priority].get(key)
+            item = metric_data[priority].get(key)
 
-                        if item is None:
-                            st.write(
-                                f"- {priority}: 측정 자료 없음"
-                            )
+            if item is None:
+                st.write(
+                    f"- {priority}: 측정 자료 없음"
+                )
 
-                        elif priority == "흡광도":
+            elif priority == "흡광도":
 
-                            value = item["value"]
+                value = item["value"]
 
-                            if value is None:
-                                st.write(
-                                    "- 흡광도: 측정값 없음"
-                                )
+                if value is None:
+                    st.write("- 흡광도: 측정값 없음")
 
-                            else:
-                                rank = ranks_for_display(
-                                    metric_data, priority, key
-                                )
+                else:
+                    rank = ranks_for_display(
+                        metric_data, priority, key
+                    )
 
-                                st.write(
-                                    f"- 실제 흡광도: {value:.3f} "
-                                    f"(측정값 순위 {rank}위)"
-                                )
+                    st.write(
+                        f"- 실제 흡광도: {value:.3f} "
+                        f"(측정값 순위 {rank}위)"
+                    )
 
-                        elif priority == "탁도":
+            elif priority == "탁도":
 
-                            value = item["value"]
+                value = item["value"]
 
-                            if value is None:
-                                st.write(
-                                    "- 탁도: 측정값 없음"
-                                )
+                if value is None:
+                    st.write("- 탁도: 측정값 없음")
 
-                            else:
-                                rank = ranks_for_display(
-                                    metric_data, priority, key
-                                )
+                else:
+                    rank = ranks_for_display(
+                        metric_data, priority, key
+                    )
+
+                    st.write(
+                        f"- 탁도 관찰 점수: {value:.2f}/8 "
+                        f"(관찰 점수 순위 {rank}위)"
+                    )
+
+            else:
+                st.write(f"- 항균성: {item['value']}")
+
 
                                 st.write(
                                     f"- 탁도 관찰 점수: {value:.2f}/8 "
