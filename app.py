@@ -3,9 +3,9 @@ import streamlit as st
 import pandas as pd
 from pathlib import Path
 
-# -----------------------------
+# =====================================
 # 1. 페이지 설정
-# -----------------------------
+# =====================================
 st.set_page_config(
     page_title="해조류 수질 정화 AI",
     page_icon="🌿",
@@ -14,13 +14,13 @@ st.set_page_config(
 
 st.title("🌿 해조류 기반 수질 정화 AI")
 st.write(
-    "오염수의 특성과 정화 목적을 바탕으로 "
-    "실험 데이터에 근거한 해조류와 혼합 조건을 추천합니다."
+    "오염수의 특성과 사용자의 정화 우선순위를 바탕으로 "
+    "실험 데이터에 근거한 해조류 및 혼합 조건을 추천합니다."
 )
 
-# -----------------------------
-# 2. CSV 데이터 불러오기
-# -----------------------------
+# =====================================
+# 2. CSV 데이터베이스
+# =====================================
 FILES = {
     "START_HERE": "seaweed_ai_database_corrected(1).csv",
     "Absorbance_Data": "seaweed_ai_database_corrected(1-2).csv",
@@ -35,80 +35,188 @@ FILES = {
 
 @st.cache_data
 def load_data():
-    data = {}
+    result = {}
 
-    for sheet_name, filename in FILES.items():
+    for sheet, filename in FILES.items():
         path = Path(__file__).parent / filename
 
         if not path.exists():
-            raise FileNotFoundError(
-                f"파일을 찾을 수 없습니다: {filename}"
-            )
+            raise FileNotFoundError(f"파일 없음: {filename}")
 
         try:
-            data[sheet_name] = pd.read_csv(
+            result[sheet] = pd.read_csv(
                 path,
                 encoding="utf-8-sig"
             )
         except pd.errors.EmptyDataError:
-            data[sheet_name] = pd.DataFrame()
+            result[sheet] = pd.DataFrame()
 
-    return data
+    return result
 
 
 try:
     data = load_data()
-    st.success("실험 데이터베이스 8개 파일을 불러왔습니다.")
+    st.success("데이터베이스 연결 완료")
 
 except Exception as e:
-    st.error("데이터베이스를 불러오지 못했습니다.")
-    st.error(str(e))
+    st.error("데이터베이스 연결에 실패했습니다.")
+    st.code(str(e))
     st.stop()
 
 
-# -----------------------------
-# 3. 공통 함수
-# -----------------------------
-def find_column(df, candidates):
-    """후보 이름 중 실제 데이터에 존재하는 열을 찾는다."""
-    for candidate in candidates:
-        if candidate in df.columns:
-            return candidate
+# =====================================
+# 3. 공통 데이터 처리 함수
+# =====================================
+def find_col(df, candidates):
+    for name in candidates:
+        if name in df.columns:
+            return name
     return None
 
 
-def show_data(df):
-    """데이터가 존재할 때 표로 표시한다."""
-    if df.empty:
-        st.info("표시할 데이터가 없습니다.")
-    else:
-        st.dataframe(df, use_container_width=True)
+def clean_text(value):
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
 
 
-def clean_numeric(series):
-    """측정값을 숫자로 변환한다."""
+def clean_number(value):
     return pd.to_numeric(
-        series.astype(str).str.replace(",", "", regex=False),
+        pd.Series([value]).astype(str).str.replace(",", ""),
         errors="coerce"
+    ).iloc[0]
+
+
+def is_positive(value):
+    value = clean_text(value).lower()
+
+    if any(word in value for word in ["미측정", "기록 없음", "불명"]):
+        return None
+
+    if value in ["있음", "유", "o", "yes", "positive", "양성", "나타남"]:
+        return True
+
+    if value in ["없음", "무", "x", "no", "negative", "음성", "안 나타남"]:
+        return False
+
+    return None
+
+
+# =====================================
+# 4. 실험 조건 정리
+# =====================================
+def prepare_conditions(df, metric):
+
+    if df.empty:
+        return {}
+
+    name_col = find_col(
+        df,
+        ["해조류/조합", "해조류", "조합"]
     )
 
+    if name_col is None:
+        return {}
 
-# -----------------------------
-# 4. 사용자 입력
-# -----------------------------
+    concentration_col = find_col(df, ["농도"])
+    ratio_col = find_col(df, ["혼합비"])
+
+    if metric == "absorbance":
+        value_col = find_col(df, ["흡광도"])
+
+    elif metric == "turbidity":
+        value_col = find_col(df, ["점수"])
+
+    else:
+        value_col = find_col(
+            df,
+            ["억제환 유무", "억제환", "결과"]
+        )
+
+    if value_col is None:
+        return {}
+
+    groups = {}
+
+    for _, row in df.iterrows():
+
+        name = clean_text(row.get(name_col, ""))
+
+        if not name:
+            continue
+
+        concentration = (
+            clean_text(row.get(concentration_col, ""))
+            if concentration_col else ""
+        )
+
+        ratio = (
+            clean_text(row.get(ratio_col, ""))
+            if ratio_col else ""
+        )
+
+        display = name
+
+        if concentration:
+            display += " / 농도 " + concentration
+
+        if ratio:
+            display += " / 혼합비 " + ratio
+
+        key = "|".join([name, concentration, ratio])
+
+        if key not in groups:
+            groups[key] = {
+                "display": display,
+                "values": []
+            }
+
+        value = row.get(value_col)
+
+        if metric in ["absorbance", "turbidity"]:
+
+            number = clean_number(value)
+
+            if pd.notna(number):
+                groups[key]["values"].append(float(number))
+
+        else:
+
+            result = is_positive(value)
+
+            if result is not None:
+                groups[key]["values"].append(result)
+
+    for item in groups.values():
+
+        values = item["values"]
+
+        if metric in ["absorbance", "turbidity"]:
+
+            item["value"] = (
+                sum(values) / len(values)
+                if values else None
+            )
+
+        else:
+
+            if True in values:
+                item["value"] = "억제환 관찰"
+
+            elif values and all(v is False for v in values):
+                item["value"] = "억제환 미관찰"
+
+            else:
+                item["value"] = "미측정 또는 불명확"
+
+    return groups
+
+
+# =====================================
+# 5. 사용자 입력
+# =====================================
 st.divider()
-st.header("1. 정화 목적 선택")
-
-target = st.selectbox(
-    "어떤 정화 기능을 우선적으로 고려할까요?",
-    [
-        "흡광도 관련 정화",
-        "탁도 개선",
-        "항균성"
-    ]
-)
-
-st.header("2. 오염수 정보 입력")
+st.header("1. 오염수 정보")
 
 pollutant = st.text_input(
     "오염물질 이름",
@@ -116,7 +224,7 @@ pollutant = st.text_input(
 )
 
 description = st.text_area(
-    "오염수의 특성 및 추가 정보",
+    "오염수의 특성",
     placeholder="예: 염료가 포함된 수용액이며 색이 진함"
 )
 
@@ -125,186 +233,365 @@ concentration = st.text_input(
     placeholder="예: 10 mg/L"
 )
 
-# -----------------------------
-# 5. 추천 결과
-# -----------------------------
+
+# =====================================
+# 6. 정화 우선순위 설정
+# =====================================
 st.divider()
-st.header("3. 해조류 추천")
+st.header("2. 정화 기능 우선순위")
 
-if st.button("해조류 추천하기", type="primary"):
+st.write(
+    "가장 중요하게 생각하는 정화 기능부터 순서대로 선택해 줘."
+)
 
-    if not pollutant.strip() and not description.strip():
-        st.warning("오염수 정보를 하나 이상 입력해 주세요.")
+metric_names = ["흡광도", "탁도", "항균성"]
 
-    else:
-        st.subheader("입력 정보")
+priority1 = st.selectbox(
+    "1순위 정화 기능",
+    metric_names,
+    index=0
+)
 
-        st.write("**정화 목적:**", target)
-        st.write("**오염물질:**", pollutant or "미입력")
-        st.write("**농도:**", concentration or "미입력")
-        st.write("**추가 정보:**", description or "없음")
+remaining1 = [x for x in metric_names if x != priority1]
 
-        st.divider()
+priority2 = st.selectbox(
+    "2순위 정화 기능",
+    remaining1,
+    index=0
+)
 
-        # -------------------------
-        # 흡광도 기반 추천
-        # -------------------------
-        if target == "흡광도 관련 정화":
+remaining2 = [x for x in remaining1 if x != priority2]
 
-            df = data["Absorbance_Data"].copy()
+priority3 = st.selectbox(
+    "3순위 정화 기능",
+    remaining2,
+    index=0
+)
 
-            value_col = find_column(df, ["흡광도"])
-            name_col = find_column(df, ["해조류/조합", "해조류", "조합"])
-            type_col = find_column(df, ["실험유형"])
-            concentration_col = find_column(df, ["농도"])
-            ratio_col = find_column(df, ["혼합비"])
+priorities = [priority1, priority2, priority3]
 
-            if value_col is None or name_col is None:
-                st.error("흡광도 데이터의 필수 열을 찾지 못했습니다.")
-            else:
-                df[value_col] = clean_numeric(df[value_col])
-                valid = df.dropna(subset=[value_col]).copy()
 
-                if valid.empty:
-                    st.warning("사용할 수 있는 흡광도 측정값이 없습니다.")
-                else:
-                    # 흡광도 원자료가 낮은 조건을 우선 표시
-                    best = valid.sort_values(
-                        by=value_col,
-                        ascending=True
-                    )
+# =====================================
+# 7. 통합 추천 알고리즘
+# =====================================
+def make_recommendations(data, priorities):
 
-                    st.subheader("추천 결과")
-                    st.write(
-                        "측정된 흡광도 원자료가 낮은 조건부터 표시했어. "
-                        "이는 해당 실험 조건에서 관찰된 값의 비교이며, "
-                        "오염물질 제거율을 의미하지는 않아."
-                    )
+    metric_data = {
+        "흡광도": prepare_conditions(
+            data["Absorbance_Data"], "absorbance"
+        ),
+        "탁도": prepare_conditions(
+            data["Turbidity_Data"], "turbidity"
+        ),
+        "항균성": prepare_conditions(
+            data["Antimicrobial_Data"], "antimicrobial"
+        )
+    }
 
-                    st.markdown("**흡광도 측정값이 낮은 조건**")
-                    show_data(best.head(5))
+    all_conditions = set()
 
-                    st.markdown("**전체 측정 결과**")
-                    show_data(valid)
+    for metric in metric_data.values():
+        all_conditions.update(metric.keys())
 
-                    st.info(
-                        "증류수 blank 값은 0으로 기록되어 있습니다. "
-                        "해조류 추출물 자체의 색이나 탁도를 보정한 값인지는 "
-                        "별도로 확인해야 합니다."
-                    )
+    if not all_conditions:
+        return [], metric_data, {}
 
-        # -------------------------
-        # 탁도 기반 추천
-        # -------------------------
-        elif target == "탁도 개선":
+    ranks = {
+        "흡광도": {},
+        "탁도": {},
+        "항균성": {}
+    }
 
-            df = data["Turbidity_Data"].copy()
+    # 흡광도: 낮을수록 우선
+    valid_abs = [
+        (key, item["value"])
+        for key, item in metric_data["흡광도"].items()
+        if item["value"] is not None
+    ]
 
-            value_col = find_column(df, ["점수"])
-            name_col = find_column(df, ["해조류/조합", "해조류", "조합"])
+    valid_abs.sort(key=lambda x: x[1])
 
-            if value_col is None or name_col is None:
-                st.error("탁도 데이터의 필수 열을 찾지 못했습니다.")
-            else:
-                df[value_col] = clean_numeric(df[value_col])
-                valid = df.dropna(subset=[value_col]).copy()
+    for rank, (key, value) in enumerate(valid_abs, start=1):
+        ranks["흡광도"][key] = rank
 
-                if valid.empty:
-                    st.warning("사용할 수 있는 탁도 측정값이 없습니다.")
-                else:
-                    best = valid.sort_values(
-                        by=value_col,
-                        ascending=False
-                    )
+    # 탁도: 관찰 점수가 높을수록 우선
+    valid_turb = [
+        (key, item["value"])
+        for key, item in metric_data["탁도"].items()
+        if item["value"] is not None
+    ]
 
-                    st.subheader("추천 결과")
-                    st.write(
-                        "줄무늬 배경의 가시성을 기준으로 점수가 높은 "
-                        "조건부터 표시했어. 점수가 높을수록 줄무늬가 "
-                        "잘 보였다는 뜻이야."
-                    )
+    valid_turb.sort(key=lambda x: x[1], reverse=True)
 
-                    st.markdown("**탁도 관찰 점수가 높은 조건**")
-                    show_data(best.head(5))
+    for rank, (key, value) in enumerate(valid_turb, start=1):
+        ranks["탁도"][key] = rank
 
-                    st.markdown("**전체 측정 결과**")
-                    show_data(valid)
+    # 항균성: 관찰 여부만 구분
+    for key, item in metric_data["항균성"].items():
 
-                    st.info(
-                        "이 점수는 육안 관찰 점수(0~8)이며, "
-                        "NTU나 탁도 제거율이 아닙니다. "
-                        "자연 침전의 영향도 고려해야 합니다."
-                    )
+        value = item["value"]
 
-        # -------------------------
-        # 항균성 기반 추천
-        # -------------------------
-        elif target == "항균성":
+        if value == "억제환 관찰":
+            ranks["항균성"][key] = 1
 
-            df = data["Antimicrobial_Data"].copy()
+        elif value == "억제환 미관찰":
+            ranks["항균성"][key] = 2
 
-            result_col = find_column(
-                df,
-                ["억제환 유무", "억제환", "결과"]
+        else:
+            ranks["항균성"][key] = 3
+
+    # 사용자 우선순위에 따라 순차 비교
+    def sort_key(key):
+
+        result = []
+
+        for priority in priorities:
+
+            rank = ranks[priority].get(key)
+
+            result.append(
+                rank if rank is not None else 999999
             )
 
-            if result_col is None:
-                st.error("항균성 데이터의 결과 열을 찾지 못했습니다.")
-            else:
-                def is_positive(value):
-                    value = str(value).strip().lower()
+        return tuple(result)
 
-                    positive_words = [
-                        "있음", "유", "o", "yes",
-                        "positive", "양성", "나타남"
-                    ]
+    ordered = sorted(
+        all_conditions,
+        key=sort_key
+    )
 
-                    return value in positive_words
+    return ordered, metric_data, ranks
 
-                positive = df[
-                    df[result_col].apply(is_positive)
-                ].copy()
 
-                st.subheader("추천 결과")
+# =====================================
+# 8. 순위 확인 함수
+# =====================================
+def ranks_for_display(metric_data, priority, key):
 
-                if positive.empty:
-                    st.warning(
-                        "현재 데이터에서 억제환이 확인된 조건이 없습니다."
-                    )
-                else:
-                    st.write(
-                        "억제환이 관찰된 조건이야. "
-                        "억제환의 크기를 측정하지 않았으므로 "
-                        "항균 효과의 강도를 순위화하지 않았어."
-                    )
-                    show_data(positive)
+    items = metric_data[priority]
 
-                st.markdown("**전체 항균성 실험 결과**")
-                show_data(df)
+    if priority == "흡광도":
 
-                st.info(
-                    "실험 날짜와 대조군 조건이 다른 결과는 "
-                    "직접적인 시간 변화나 효과 크기 비교에 "
-                    "사용하지 않았습니다."
-                )
+        valid = sorted(
+            [
+                (k, v["value"])
+                for k, v in items.items()
+                if v["value"] is not None
+            ],
+            key=lambda x: x[1]
+        )
 
-        # -------------------------
-        # 결과 해석 안내
-        # -------------------------
+    elif priority == "탁도":
+
+        valid = sorted(
+            [
+                (k, v["value"])
+                for k, v in items.items()
+                if v["value"] is not None
+            ],
+            key=lambda x: x[1],
+            reverse=True
+        )
+
+    else:
+
+        return (
+            1 if items[key]["value"] == "억제환 관찰"
+            else 2
+        )
+
+    for rank, (condition, value) in enumerate(valid, start=1):
+
+        if condition == key:
+            return rank
+
+    return "순위 없음"
+
+
+# =====================================
+# 9. 추천 결과 출력
+# =====================================
+st.divider()
+st.header("3. 통합 분석 및 추천")
+
+if st.button("통합 분석 및 추천하기", type="primary"):
+
+    if not pollutant.strip() and not description.strip():
+
+        st.warning("오염수 정보를 하나 이상 입력해 줘.")
+
+    else:
+
+        ordered, metric_data, ranks = make_recommendations(
+            data,
+            priorities
+        )
+
+        st.subheader("입력 정보")
+
+        st.write("**오염물질:**", pollutant or "미입력")
+        st.write("**농도:**", concentration or "미입력")
+        st.write("**특성:**", description or "미입력")
+
+        st.write("**정화 우선순위:**")
+        st.write(" → ".join(priorities))
+
+        # 메틸렌 블루 직접 실험 여부 확인
+        if pollutant.strip().lower() in [
+            "메틸렌 블루",
+            "methylene blue"
+        ]:
+
+            st.success(
+                "입력한 물질은 흡광도 실험에 사용한 "
+                "메틸렌 블루와 일치합니다."
+            )
+
+        else:
+
+            st.warning(
+                "현재 흡광도 실험은 메틸렌 블루를 대상으로 했습니다. "
+                "다른 오염물질에 동일한 결과가 나타난다고 "
+                "확정할 수 없습니다."
+            )
+
         st.divider()
-        st.subheader("결과 해석 시 주의사항")
 
-        st.write(
-            "현재 추천은 입력한 오염물질의 특성을 자동으로 분석해 "
-            "새로운 정화 효과를 예측하는 머신러닝 모델이 아닙니다."
-        )
+        if not ordered:
 
-        st.write(
-            "실제 추천은 데이터베이스에 기록된 실험 결과를 "
-            "정화 목적에 따라 비교하는 방식입니다."
-        )
+            st.error("추천에 사용할 수 있는 데이터가 없습니다.")
 
-        st.write(
-            "실험하지 않은 오염물질이나 해조류 조합의 효과는 "
-            "확인된 사실처럼 제시하지 않습니다."
-        )
+        else:
+
+            st.subheader("추천 결과")
+
+            st.write(
+                "사용자가 설정한 우선순위에 따라 "
+                "실험 조건을 순차적으로 비교한 결과입니다."
+            )
+
+            for index, key in enumerate(ordered[:5]):
+
+                display = None
+
+                for metric in metric_data.values():
+
+                    if key in metric:
+                        display = metric[key]["display"]
+                        break
+
+                st.markdown("---")
+
+                if index == 0:
+                    st.markdown("### 🏆 1순위 추천")
+                else:
+                    st.markdown(f"### {index + 1}순위 추천")
+
+                st.write("**추천 조건:**", display)
+
+                st.markdown("**정화 기능별 실험 근거**")
+
+                for priority in priorities:
+
+                    item = metric_data[priority].get(key)
+
+                    if item is None:
+
+                        st.write(f"- {priority}: 측정 자료 없음")
+
+                    elif priority == "흡광도":
+
+                        value = item["value"]
+
+                        if value is None:
+                            st.write("- 흡광도: 측정값 없음")
+
+                        else:
+
+                            rank = ranks_for_display(
+                                metric_data, priority, key
+                            )
+
+                            st.write(
+                                f"- 흡광도: {value:.3f} "
+                                f"(측정값 순위 {rank}위)"
+                            )
+
+                    elif priority == "탁도":
+
+                        value = item["value"]
+
+                        if value is None:
+                            st.write("- 탁도: 측정값 없음")
+
+                        else:
+
+                            rank = ranks_for_display(
+                                metric_data, priority, key
+                            )
+
+                            st.write(
+                                f"- 탁도 관찰 점수: {value:.2f}/8 "
+                                f"(관찰 점수 순위 {rank}위)"
+                            )
+
+                    else:
+
+                        st.write(
+                            f"- 항균성: {item['value']}"
+                        )
+
+            st.divider()
+
+            st.subheader("추천 판단 기준")
+
+            for i, priority in enumerate(priorities, start=1):
+                st.write(f"{i}순위 기준: {priority}")
+
+            st.info(
+                "흡광도와 탁도는 각각의 측정 방향에 따라 비교했습니다. "
+                "항균성은 억제환 관찰 여부만 구분했습니다. "
+                "서로 다른 지표를 하나의 수치로 합산하지 않았습니다."
+            )
+
+            st.warning(
+                "추천 결과는 현재 실험 데이터에 기반한 조건 비교입니다. "
+                "실험하지 않은 오염물질이나 조건의 효과를 보장하지 않습니다."
+            )
+
+        # =================================
+        # 10. 문헌 자료
+        # =================================
+        st.divider()
+        st.subheader("문헌 근거")
+
+        literature = data["Literature"]
+
+        if literature.empty:
+
+            st.info(
+                "현재 등록된 문헌 자료가 없습니다. "
+                "따라서 이번 결과에는 문헌 기반 추천이 포함되지 않았습니다."
+            )
+
+        else:
+
+            st.write(
+                "등록된 문헌 자료입니다. "
+                "실험 결과와 문헌 결과는 구분해서 해석해야 합니다."
+            )
+
+            st.dataframe(
+                literature,
+                use_container_width=True
+            )
+
+
+# =====================================
+# 11. 데이터베이스 정보
+# =====================================
+with st.expander("사용 중인 데이터베이스 확인"):
+
+    for name, df in data.items():
+
+        st.write(f"**{name}:** {len(df)}개 행")
