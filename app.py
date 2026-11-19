@@ -561,6 +561,43 @@ if st.button("통합 분석 및 추천하기", type="primary"):
 
                 st.write("**추천 조건:**", display)
 
+
+                # 머신러닝 예측 결과 표시
+                st.markdown("**🤖 머신러닝 예측 결과**")
+
+                try:
+                    parts = key.split("|")
+                    seaweed_name = parts[0]
+
+                    if "+" not in seaweed_name:
+                        concentration_value = parts[1] if len(parts) > 1 else ""
+
+                        if concentration_value in [
+                            "저농도", "중농도", "고농도"
+                        ]:
+                            predicted_value = predict_single(
+                                seaweed_name,
+                                concentration_value
+                            )
+
+                            st.write(
+                                f"예측 흡광도: {predicted_value:.3f}"
+                            )
+
+                        else:
+                            st.info(
+                                "농도 정보가 없어 예측하지 않았습니다."
+                            )
+
+                    else:
+                        st.info(
+                            "혼합 조건의 예측은 다음 단계에서 연결합니다."
+                        )
+
+                except Exception as e:
+                    st.warning(f"예측 결과 표시 실패: {e}")
+
+                
                 st.markdown("**정화 기능별 실험 근거**")
 
                 for priority in priorities:
