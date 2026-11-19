@@ -1,6 +1,7 @@
 
 import streamlit as st
 import pandas as pd
+import joblib
 from pathlib import Path
 
 # =====================================
@@ -17,6 +18,37 @@ st.write(
     "오염수의 특성과 사용자의 정화 우선순위를 바탕으로 "
     "실험 데이터에 근거한 해조류 및 혼합 조건을 추천합니다."
 )
+
+# =====================================
+# 학습된 머신러닝 모델 불러오기
+# =====================================
+
+MODEL_DIR = Path(__file__).parent / "models"
+
+@st.cache_resource
+def load_ml_models():
+    single_model = joblib.load(
+        MODEL_DIR / "single_seaweed_model.pkl"
+    )
+
+    mixture_model = joblib.load(
+        MODEL_DIR / "mixture_seaweed_model.pkl"
+    )
+
+    model_info = joblib.load(
+        MODEL_DIR / "model_info.pkl"
+    )
+
+    return single_model, mixture_model, model_info
+
+
+try:
+    single_model, mixture_model, model_info = load_ml_models()
+    st.success("머신러닝 모델 연결 완료")
+
+except Exception as e:
+    st.error("머신러닝 모델을 불러오지 못했습니다.")
+    st.code(str(e))
 
 # =====================================
 # 2. CSV 데이터베이스
@@ -101,6 +133,46 @@ def is_positive(value):
 
     return None
 
+# =====================================
+# 머신러닝 흡광도 예측 함수
+# =====================================
+
+SEAWEEDS = ["곰피", "바다포도", "다시마", "청각"]
+
+
+def predict_single(seaweed, concentration):
+    features = pd.DataFrame(
+        [[
+            1 if name == seaweed else 0
+            for name in SEAWEEDS
+        ] + [
+            1 if concentration == level else 0
+            for level in ["저농도", "중농도", "고농도"]
+        ]],
+        columns=model_info["single_features"]
+    )
+
+    return float(single_model.predict(features)[0])
+
+
+def predict_mixture(seaweed1, seaweed2, ratio):
+    proportions = {
+        seaweed1: 0.75 if ratio == "3:1" else 0.5,
+        seaweed2: 0.25 if ratio == "3:1" else 0.5
+    }
+
+    features = pd.DataFrame(
+        [[
+            proportions.get(name, 0)
+            for name in SEAWEEDS
+        ] + [
+            1 if ratio == "1:1" else 0,
+            1 if ratio == "3:1" else 0
+        ]],
+        columns=model_info["mixture_features"]
+    )
+
+    return float(mixture_model.predict(features)[0])
 
 # =====================================
 # 4. 실험 조건 정리
@@ -674,3 +746,88 @@ with st.expander("사용 중인 데이터베이스 확인"):
     for name, df in data.items():
 
         st.write(f"**{name}:** {len(df)}개 행")
+        
+
+# =====================================
+# 12. 머신러닝 흡광도 예측
+# =====================================
+
+st.divider()
+st.header("🤖 머신러닝 흡광도 예측")
+
+st.write(
+    "학습된 Random Forest 모델을 이용해 "
+    "단일 해조류 또는 혼합 해조류의 흡광도를 예측합니다."
+)
+
+prediction_type = st.radio(
+    "예측할 실험 유형",
+    ["단일 해조류", "혼합 해조류"],
+    horizontal=True
+)
+
+if prediction_type == "단일 해조류":
+
+    selected_seaweed = st.selectbox(
+        "해조류 선택",
+        SEAWEEDS
+    )
+
+    selected_concentration = st.selectbox(
+        "농도 선택",
+        ["저농도", "중농도", "고농도"]
+    )
+
+    if st.button("단일 해조류 흡광도 예측"):
+
+        prediction = predict_single(
+            selected_seaweed,
+            selected_concentration
+        )
+
+        st.metric(
+            "예측 흡광도",
+            f"{prediction:.3f}"
+        )
+
+else:
+
+    seaweed1 = st.selectbox(
+        "첫 번째 해조류",
+        SEAWEEDS,
+        key="mixture_seaweed1"
+    )
+
+    seaweed2_options = [
+        name for name in SEAWEEDS
+        if name != seaweed1
+    ]
+
+    seaweed2 = st.selectbox(
+        "두 번째 해조류",
+        seaweed2_options
+    )
+
+    ratio = st.selectbox(
+        "혼합비 (첫 번째 해조류 기준)",
+        ["1:1", "3:1"]
+    )
+
+    if st.button("혼합 해조류 흡광도 예측"):
+
+        prediction = predict_mixture(
+            seaweed1,
+            seaweed2,
+            ratio
+        )
+
+        st.metric(
+            "예측 흡광도",
+            f"{prediction:.3f}"
+        )
+
+st.caption(
+    "주의: 예측값은 현재 보유한 실험 데이터로 학습한 모델의 추정값입니다. "
+    "실제 측정값이 아니며, 학습 데이터 범위를 벗어난 조건에서는 "
+    "정확도가 보장되지 않습니다."
+)
