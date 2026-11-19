@@ -648,30 +648,187 @@ if st.button("통합 분석 및 추천하기", type="primary"):
                                 f"(관찰 점수 순위 {rank}위)"
                             )
 
-                    else:
 
-                        st.write(
-                            f"- 항균성: {item['value']}"
+            # 전체 추천 순위 구성
+            recommendation_items = []
+
+            for key in ordered[:5]:
+                display = None
+
+                for metric in metric_data.values():
+                    if key in metric:
+                        display = metric[key]["display"]
+                        break
+
+                recommendation_items.append((key, display))
+
+            # 전체 추천 순위 표시
+            st.subheader("전체 추천 순위")
+
+            for index, (key, display) in enumerate(
+                recommendation_items
+            ):
+                st.write(
+                    f"**{index + 1}순위:** {display}"
+                )
+
+            st.divider()
+
+            # 순위별 상세 분석
+            st.subheader("순위별 상세 분석")
+
+            for index, (key, display) in enumerate(
+                recommendation_items
+            ):
+
+                with st.expander(
+                    f"{index + 1}순위 | {display}",
+                    expanded=(index == 0)
+                ):
+
+                    st.markdown("### 실험 데이터")
+
+                    for priority in priorities:
+
+                        item = metric_data[priority].get(key)
+
+                        if item is None:
+                            st.write(
+                                f"- {priority}: 측정 자료 없음"
+                            )
+
+                        elif priority == "흡광도":
+
+                            value = item["value"]
+
+                            if value is None:
+                                st.write(
+                                    "- 흡광도: 측정값 없음"
+                                )
+
+                            else:
+                                rank = ranks_for_display(
+                                    metric_data, priority, key
+                                )
+
+                                st.write(
+                                    f"- 실제 흡광도: {value:.3f} "
+                                    f"(측정값 순위 {rank}위)"
+                                )
+
+                        elif priority == "탁도":
+
+                            value = item["value"]
+
+                            if value is None:
+                                st.write(
+                                    "- 탁도: 측정값 없음"
+                                )
+
+                            else:
+                                rank = ranks_for_display(
+                                    metric_data, priority, key
+                                )
+
+                                st.write(
+                                    f"- 탁도 관찰 점수: {value:.2f}/8 "
+                                    f"(관찰 점수 순위 {rank}위)"
+                                )
+
+                        else:
+                            st.write(
+                                f"- 항균성: {item['value']}"
+                            )
+
+                    st.divider()
+
+                    # 머신러닝 예측
+                    st.markdown("### 🤖 머신러닝 분석")
+
+                    try:
+                        parts = key.split("|")
+                        seaweed_name = parts[0]
+                        concentration_value = (
+                            parts[1] if len(parts) > 1 else ""
                         )
+
+                        if (
+                            "+" not in seaweed_name
+                            and concentration_value in [
+                                "저농도", "중농도", "고농도"
+                            ]
+                        ):
+
+                            predicted_value = predict_single(
+                                seaweed_name,
+                                concentration_value
+                            )
+
+                            st.metric(
+                                "예측 흡광도",
+                                f"{predicted_value:.3f}"
+                            )
+
+                            absorbance_item = metric_data.get(
+                                "흡광도", {}
+                            ).get(key)
+
+                            if (
+                                absorbance_item is not None
+                                and absorbance_item["value"] is not None
+                            ):
+
+                                actual_value = absorbance_item["value"]
+
+                                st.write(
+                                    f"실제 측정값: {actual_value:.3f}"
+                                )
+
+                                st.write(
+                                    f"예측 절대 오차: "
+                                    f"{abs(absorbance_item['value'] - predicted_value):.3f}"
+                                )
+
+                        else:
+                            st.info(
+                                "현재 조건은 단일 해조류 모델의 "
+                                "입력 형식과 일치하지 않아 "
+                                "예측하지 않았습니다."
+                            )
+
+                    except Exception as e:
+                        st.warning(
+                            f"예측 결과 표시 실패: {e}"
+                        )
+
+                    st.caption(
+                        "머신러닝 예측값은 실제 측정값이 아닌 "
+                        "학습 모델의 추정값입니다."
+                    )
 
             st.divider()
 
             st.subheader("추천 판단 기준")
 
             for i, priority in enumerate(priorities, start=1):
-                st.write(f"{i}순위 기준: {priority}")
+                st.write(
+                    f"{i}순위 기준: {priority}"
+                )
 
             st.info(
-                "흡광도와 탁도는 각각의 측정 방향에 따라 비교했습니다. "
-                "항균성은 억제환 관찰 여부만 구분했습니다. "
-                "서로 다른 지표를 하나의 수치로 합산하지 않았습니다."
+                "흡광도와 탁도는 각각의 측정 방향에 따라 "
+                "비교했습니다. 항균성은 억제환 관찰 여부만 "
+                "구분했습니다. 서로 다른 지표를 하나의 "
+                "수치로 합산하지 않았습니다."
             )
 
             st.warning(
-                "추천 결과는 현재 실험 데이터에 기반한 조건 비교입니다. "
-                "실험하지 않은 오염물질이나 조건의 효과를 보장하지 않습니다."
+                "추천 결과는 현재 실험 데이터에 기반한 "
+                "조건 비교입니다. 실험하지 않은 오염물질이나 "
+                "조건의 효과를 보장하지 않습니다."
             )
 
+        
         # =================================
         # 10. 문헌 자료
         # =================================
