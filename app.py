@@ -740,7 +740,7 @@ for index, (key, display) in enumerate(
                 st.divider()
 
                     # 머신러닝 예측
-                    st.markdown("### 🤖 머신러닝 분석")
+                st.markdown("### 🤖 머신러닝 분석")
 
                     try:
                         parts = key.split("|")
