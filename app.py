@@ -788,165 +788,365 @@ if "recommendation_result" in st.session_state:
 # =====================================
 
 st.divider()
-st.header("4. 관련 논문 검색")
+st.header("4. 추천 결과 기반 관련 논문 검색")
 
 st.write(
-    "OpenAlex를 이용해 해조류, 수질 정화, "
-    "흡착 및 항균성과 관련된 학술 자료를 검색합니다."
+    "추천된 해조류와 입력한 오염물질을 바탕으로 "
+    "관련 학술 자료를 자동 검색합니다."
 )
 
-literature_query = st.text_input(
-    "논문 검색어",
-    placeholder="예: seaweed water purification"
-)
+if "recommendation_result" not in st.session_state:
 
-if st.button("논문 검색"):
+    st.info("먼저 통합 분석 및 추천을 실행해 주세요.")
 
-    if not literature_query.strip():
+else:
 
-        st.warning("검색어를 입력해 줘.")
+    result = st.session_state["recommendation_result"]
 
-    else:
+    pollutant = str(result.get("pollutant") or "").strip()
 
-        import json
-        import urllib.parse
-        import urllib.request
-        import urllib.error
+    ordered = result.get("ordered", [])
+    metric_data = result.get("metric_data", {})
 
-        try:
+    # 해조류별 학명 및 영문명
+    seaweed_names = {
+        "곰피": ["Ecklonia stolonifera"],
+        "바다포도": ["Caulerpa lentillifera"],
+        "다시마": ["Saccharina japonica", "Laminaria japonica"],
+        "청각": ["Codium fragile"]
+    }
 
-            api_key = st.secrets["OPENALEX_API_KEY"]
+    # 추천 상위 5개에서 해조류 추출
+    recommended_seaweeds = []
 
-            params = urllib.parse.urlencode({
-                "search": literature_query,
-                "per-page": 5,
-                "api_key": api_key
-            })
+    for key in ordered[:5]:
 
-            url = (
-                "https://api.openalex.org/works?"
-                + params
-            )
+        display = str(key)
 
-            request = urllib.request.Request(
-                url,
-                headers={
-                    "User-Agent": "SeaweedWaterPurificationAI/1.0"
-                }
-            )
+        for metric in metric_data.values():
 
-            with urllib.request.urlopen(
-                request,
-                timeout=20
-            ) as response:
+            if key in metric:
+                display = str(metric[key]["display"])
+                break
 
-                search_data = json.loads(
-                    response.read().decode("utf-8")
+        for seaweed in seaweed_names:
+
+            if seaweed in display and seaweed not in recommended_seaweeds:
+                recommended_seaweeds.append(seaweed)
+
+    st.write("**검색 대상 오염물질:**", pollutant or "미입력")
+
+    st.write(
+        "**추천 해조류:**",
+        ", ".join(recommended_seaweeds) or "확인되지 않음"
+    )
+
+    st.caption(
+        "논문 검색은 추천 결과에 포함된 해조류를 기준으로 진행합니다."
+    )
+
+    if st.button("추천 결과 관련 논문 검색"):
+
+        if not pollutant:
+
+            st.warning("오염물질 정보가 없어 검색할 수 없습니다.")
+
+        elif not recommended_seaweeds:
+
+            st.warning("추천 결과에서 해조류를 확인할 수 없습니다.")
+
+        else:
+
+            import json
+            import urllib.parse
+            import urllib.request
+            import urllib.error
+            import re
+
+            all_papers = {}
+            search_errors = []
+
+            # 해조류와 오염물질을 조합한 검색
+            search_queries = []
+
+            for seaweed in recommended_seaweeds:
+
+                scientific_names = seaweed_names[seaweed]
+
+                for scientific_name in scientific_names:
+
+                    search_queries.append(
+                        f'"{scientific_name}" "{pollutant}"'
+                    )
+
+                    search_queries.append(
+                        f'"{scientific_name}" water treatment'
+                    )
+
+                search_queries.append(
+                    f'{seaweed} {pollutant} 수질 정화'
                 )
 
-            papers = search_data.get("results", [])
+            # 중복 검색어 제거
+            search_queries = list(dict.fromkeys(search_queries))
 
-            if not papers:
+            with st.spinner("관련 논문을 검색하고 있습니다..."):
 
-                st.info("검색 결과가 없습니다.")
+                for query in search_queries:
+
+                    params = urllib.parse.urlencode({
+                        "search": query,
+                        "per-page": 20
+                    })
+
+                    url = (
+                        "https://api.openalex.org/works?"
+                        + params
+                    )
+
+                    request = urllib.request.Request(
+                        url,
+                        headers={
+                            "User-Agent":
+                            "SeaweedWaterPurificationAI/1.0"
+                        }
+                    )
+
+                    try:
+
+                        with urllib.request.urlopen(
+                            request,
+                            timeout=20
+                        ) as response:
+
+                            search_data = json.loads(
+                                response.read().decode("utf-8")
+                            )
+
+                        for paper in search_data.get("results", []):
+
+                            paper_id = paper.get("id")
+
+                            if paper_id:
+                                all_papers[paper_id] = paper
+
+                    except Exception as e:
+
+                        search_errors.append(str(e))
+
+            # 초록 복원
+            def get_abstract(paper):
+
+                abstract_index = paper.get(
+                    "abstract_inverted_index"
+                )
+
+                if not abstract_index:
+                    return ""
+
+                words = [
+                    (position, word)
+                    for word, positions in abstract_index.items()
+                    for position in positions
+                ]
+
+                return " ".join(
+                    word for position, word in sorted(words)
+                )
+
+            # 검색 결과 분류
+            direct_papers = []
+            similar_papers = []
+
+            pollutant_lower = pollutant.lower()
+
+            for paper in all_papers.values():
+
+                title = paper.get("title") or ""
+                abstract = get_abstract(paper)
+
+                text_content = (
+                    title + " " + abstract
+                ).lower()
+
+                matched_seaweeds = []
+
+                for seaweed in recommended_seaweeds:
+
+                    for name in seaweed_names[seaweed]:
+
+                        if name.lower() in text_content:
+
+                            matched_seaweeds.append(seaweed)
+                            break
+
+                pollutant_match = (
+                    pollutant_lower in text_content
+                )
+
+                water_keywords = [
+                    "adsorption",
+                    "absorption",
+                    "removal",
+                    "purification",
+                    "water treatment",
+                    "antimicrobial",
+                    "pollutant",
+                    "dye"
+                ]
+
+                function_match = any(
+                    word in text_content
+                    for word in water_keywords
+                )
+
+                paper["reconstructed_abstract"] = abstract
+                paper["matched_seaweeds"] = list(
+                    dict.fromkeys(matched_seaweeds)
+                )
+
+                # 동일 해조류와 오염물질이 제목 또는 초록에
+                # 모두 확인된 경우에만 직접 근거 후보로 분류
+                if matched_seaweeds and pollutant_match:
+
+                    direct_papers.append(paper)
+
+                elif matched_seaweeds or (
+                    pollutant_match and function_match
+                ):
+
+                    similar_papers.append(paper)
+
+            # 검색 결과 표시
+            st.success(
+                f"총 {len(all_papers)}개의 중복 제거된 자료를 검색했습니다."
+            )
+
+            st.subheader("① 직접 근거 논문")
+
+            st.caption(
+                "추천 해조류의 학명과 입력 오염물질이 "
+                "제목 또는 초록에서 함께 확인된 자료입니다. "
+                "실제 실험 조건까지 동일하다는 뜻은 아닙니다."
+            )
+
+            if not direct_papers:
+
+                st.info(
+                    "검색된 자료 중 직접 근거 기준에 "
+                    "해당하는 논문이 없습니다."
+                )
 
             else:
 
-                st.success(
-                    f"{len(papers)}개의 논문을 찾았습니다."
+                for index, paper in enumerate(direct_papers[:5]):
+
+                    with st.expander(
+                        f"{index + 1}. {paper.get('title') or '제목 없음'}"
+                    ):
+
+                        st.write(
+                            "**발행 연도:**",
+                            paper.get("publication_year") or "정보 없음"
+                        )
+
+                        st.write(
+                            "**확인된 해조류:**",
+                            ", ".join(paper["matched_seaweeds"])
+                        )
+
+                        st.write(
+                            "**DOI:**",
+                            paper.get("doi") or "정보 없음"
+                        )
+
+                        if paper.get("doi"):
+
+                            st.markdown(
+                                f"[논문 원문 링크]({paper['doi']})"
+                            )
+
+                        if paper["reconstructed_abstract"]:
+
+                            st.write(
+                                "**초록:**",
+                                paper["reconstructed_abstract"]
+                            )
+
+                        else:
+
+                            st.write("초록: 제공되지 않음")
+
+                        st.caption(
+                            "주의: 검색어 일치에 따른 후보 분류이며 "
+                            "논문의 실험 결과를 직접 검증한 것은 아닙니다."
+                        )
+
+            st.divider()
+
+            st.subheader("② 유사 근거 논문")
+
+            st.caption(
+                "추천 해조류 또는 오염물질이나 정화 기작 중 "
+                "일부가 관련된 자료입니다."
+            )
+
+            if not similar_papers:
+
+                st.info("검색된 유사 근거 자료가 없습니다.")
+
+            else:
+
+                for index, paper in enumerate(similar_papers[:5]):
+
+                    with st.expander(
+                        f"{index + 1}. {paper.get('title') or '제목 없음'}"
+                    ):
+
+                        st.write(
+                            "**발행 연도:**",
+                            paper.get("publication_year") or "정보 없음"
+                        )
+
+                        st.write(
+                            "**관련 해조류:**",
+                            ", ".join(paper["matched_seaweeds"])
+                            or "검색된 해조류 없음"
+                        )
+
+                        st.write(
+                            "**DOI:**",
+                            paper.get("doi") or "정보 없음"
+                        )
+
+                        if paper.get("doi"):
+
+                            st.markdown(
+                                f"[논문 원문 링크]({paper['doi']})"
+                            )
+
+                        if paper["reconstructed_abstract"]:
+
+                            st.write(
+                                "**초록:**",
+                                paper["reconstructed_abstract"]
+                            )
+
+                        else:
+
+                            st.write("초록: 제공되지 않음")
+
+                        st.caption(
+                            "유사 근거는 추천 조건에 대한 간접적인 "
+                            "참고 자료이며 동일한 정화 효과를 보장하지 않습니다."
+                        )
+
+            if search_errors:
+
+                st.warning(
+                    "일부 검색 요청에 실패했습니다. "
+                    "검색 결과가 제한되었을 수 있습니다."
                 )
-
-                for paper in papers:
-
-                    st.divider()
-
-                    st.markdown(
-                        "### " + paper.get(
-                            "title",
-                            "제목 정보 없음"
-                        )
-                    )
-
-                    authors = paper.get(
-                        "authorships",
-                        []
-                    )
-
-                    author_names = [
-                        a.get("author", {}).get(
-                            "display_name",
-                            ""
-                        )
-                        for a in authors[:5]
-                    ]
-
-                    st.write(
-                        "저자:",
-                        ", ".join(author_names) or "정보 없음"
-                    )
-
-                    st.write(
-                        "출판 연도:",
-                        paper.get(
-                            "publication_year",
-                            "정보 없음"
-                        )
-                    )
-
-                    st.write(
-                        "DOI:",
-                        paper.get("doi") or "정보 없음"
-                    )
-
-                    if paper.get("doi"):
-
-                        st.markdown(
-                            f"[논문 원문 링크]({paper['doi']})"
-                        )
-
-                    abstract_index = paper.get(
-                        "abstract_inverted_index"
-                    )
-
-                    if abstract_index:
-
-                        words = [
-                            (position, word)
-                            for word, positions
-                            in abstract_index.items()
-                            for position in positions
-                        ]
-
-                        abstract = " ".join(
-                            word
-                            for position, word
-                            in sorted(words)
-                        )
-
-                        st.write("초록:", abstract)
-
-                    else:
-
-                        st.write("초록: 제공되지 않음")
-
-        except KeyError:
-
-            st.error(
-                "Streamlit Secrets에서 OPENALEX_API_KEY를 "
-                "찾을 수 없습니다."
-            )
-
-        except urllib.error.HTTPError as e:
-
-            st.error(
-                f"OpenAlex 검색 오류: HTTP {e.code}"
-            )
-
-        except Exception as e:
-
-            st.error(
-                f"검색 중 오류가 발생했습니다: {e}"
-            )
 
 
 # 데이터베이스에 저장된 문헌 정보
