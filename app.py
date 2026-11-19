@@ -737,17 +737,6 @@ for index, (key, display) in enumerate(
             else:
                 st.write(f"- 항균성: {item['value']}")
 
-
-                                st.write(
-                                    f"- 탁도 관찰 점수: {value:.2f}/8 "
-                                    f"(관찰 점수 순위 {rank}위)"
-                                )
-
-                        else:
-                            st.write(
-                                f"- 항균성: {item['value']}"
-                            )
-
                     st.divider()
 
                     # 머신러닝 예측
