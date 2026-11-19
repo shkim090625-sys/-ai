@@ -217,6 +217,10 @@ def prepare_conditions(df, metric):
         if not name:
             continue
 
+        # 대조군은 해조류 추천 대상에서 제외
+        if name in ["증류수", "메틸렌 블루"]:
+            continue
+        
         concentration = (
             clean_text(row.get(concentration_col, ""))
             if concentration_col else ""
