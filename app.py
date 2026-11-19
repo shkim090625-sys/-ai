@@ -675,16 +675,18 @@ if st.button("통합 분석 및 추천하기", type="primary"):
             st.divider()
 
             # 순위별 상세 분석
-            st.subheader("순위별 상세 분석")
+            st.subheader("추천 조건 상세 분석")
 
-            for index, (key, display) in enumerate(
-                recommendation_items
-            ):
+for index, (key, display) in enumerate(
+    recommendation_items
+):
 
-                with st.expander(
-                    f"{index + 1}순위 | {display}",
-                    expanded=(index == 0)
-                ):
+    with st.expander(
+        f"{index + 1}순위 상세 분석",
+        expanded=(index == 0)
+    ):
+
+        st.markdown(f"**추천 조건:** {display}")
 
                     st.markdown("### 실험 데이터")
 
