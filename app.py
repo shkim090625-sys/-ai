@@ -586,6 +586,85 @@ if st.button("통합 분석 및 추천하기", type="primary"):
                 use_container_width=True
             )
 
+import json
+import urllib.parse
+import urllib.request
+import urllib.error
+
+st.divider()
+st.header("📚 실시간 해외 논문 검색")
+
+st.write("오염물질과 해조류 관련 연구 논문을 OpenAlex에서 검색합니다.")
+
+search_keyword = st.text_input(
+    "검색할 연구 주제",
+    placeholder="예: methylene blue seaweed"
+)
+
+if st.button("논문 검색하기"):
+    if not search_keyword.strip():
+        st.warning("검색어를 입력해 주세요.")
+    else:
+        try:
+            api_key = st.secrets["OPENALEX_API_KEY"]
+
+            params = urllib.parse.urlencode({
+                "search": search_keyword,
+                "per-page": 5,
+                "api_key": api_key
+            })
+
+            url = "https://api.openalex.org/works?" + params
+
+            request = urllib.request.Request(
+                url,
+                headers={"User-Agent": "SeaweedWaterPurificationAI"}
+            )
+
+            with urllib.request.urlopen(request, timeout=20) as response:
+                result = json.loads(response.read().decode("utf-8"))
+
+            papers = result.get("results", [])
+
+            if not papers:
+                st.info("검색 결과가 없습니다.")
+
+            for paper in papers:
+                st.subheader(paper.get("title", "제목 없음"))
+
+                authors = paper.get("authorships", [])
+                author_names = [
+                    a.get("author", {}).get("display_name", "")
+                    for a in authors[:5]
+                ]
+
+                st.write("저자:", ", ".join(author_names) or "정보 없음")
+                st.write("출판 연도:", paper.get("publication_year", "정보 없음"))
+                st.write("DOI:", paper.get("doi") or "정보 없음")
+
+                abstract_index = paper.get("abstract_inverted_index")
+                if abstract_index:
+                    words = [
+                        (position, word)
+                        for word, positions in abstract_index.items()
+                        for position in positions
+                    ]
+                    abstract = " ".join(
+                        word for position, word in sorted(words)
+                    )
+                    st.write("초록:", abstract)
+                else:
+                    st.write("초록: 제공되지 않음")
+
+                st.divider()
+
+        except KeyError:
+            st.error("Streamlit Secrets에서 API 키를 찾을 수 없습니다.")
+        except urllib.error.HTTPError as e:
+            st.error(f"OpenAlex 검색 오류: HTTP {e.code}")
+        except Exception as e:
+            st.error(f"검색 중 오류가 발생했습니다: {e}")
+
 
 # =====================================
 # 11. 데이터베이스 정보
