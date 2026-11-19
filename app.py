@@ -737,7 +737,7 @@ for index, (key, display) in enumerate(
             else:
                 st.write(f"- 항균성: {item['value']}")
 
-                    st.divider()
+                st.divider()
 
                     # 머신러닝 예측
                     st.markdown("### 🤖 머신러닝 분석")
