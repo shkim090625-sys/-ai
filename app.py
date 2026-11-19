@@ -485,8 +485,9 @@ def ranks_for_display(metric_data, priority, key):
 
 
 # =====================================
-# 9. 추천 결과 출력
+# 9. 통합 분석 및 추천 결과
 # =====================================
+
 st.divider()
 st.header("3. 통합 분석 및 추천")
 
@@ -495,122 +496,119 @@ if st.button("통합 분석 및 추천하기", type="primary"):
     if not pollutant.strip() and not description.strip():
 
         st.warning("오염수 정보를 하나 이상 입력해 줘.")
+        st.session_state.pop("recommendation_result", None)
 
     else:
 
-        ordered, metric_data, ranks = make_recommendations(
-            data,
-            priorities
+        try:
+            ordered, metric_data, ranks = make_recommendations(
+                data,
+                priorities
+            )
+
+            st.session_state["recommendation_result"] = {
+                "ordered": ordered,
+                "metric_data": metric_data,
+                "ranks": ranks,
+                "pollutant": pollutant,
+                "concentration": concentration,
+                "description": description,
+                "priorities": priorities.copy()
+            }
+
+        except Exception as e:
+            st.error("추천 분석 중 오류가 발생했습니다.")
+            st.code(str(e))
+
+
+# 추천 결과 출력
+if "recommendation_result" in st.session_state:
+
+    result = st.session_state["recommendation_result"]
+
+    ordered = result["ordered"]
+    metric_data = result["metric_data"]
+    ranks = result["ranks"]
+    saved_priorities = result["priorities"]
+
+    st.divider()
+    st.subheader("입력 정보")
+
+    st.write("**오염물질:**", result["pollutant"] or "미입력")
+    st.write("**농도:**", result["concentration"] or "미입력")
+    st.write("**특성:**", result["description"] or "미입력")
+
+    st.write("**정화 우선순위:**")
+    st.write(" → ".join(saved_priorities))
+
+    if result["pollutant"].strip().lower() in [
+        "메틸렌 블루",
+        "methylene blue"
+    ]:
+        st.success(
+            "입력한 물질은 흡광도 실험에 사용한 "
+            "메틸렌 블루와 일치합니다."
+        )
+    else:
+        st.warning(
+            "현재 흡광도 실험은 메틸렌 블루를 대상으로 했습니다. "
+            "다른 오염물질에도 동일한 결과가 나타난다고 "
+            "확정할 수 없습니다."
         )
 
-        st.subheader("입력 정보")
+    st.divider()
 
-        st.write("**오염물질:**", pollutant or "미입력")
-        st.write("**농도:**", concentration or "미입력")
-        st.write("**특성:**", description or "미입력")
+    if not ordered:
 
-        st.write("**정화 우선순위:**")
-        st.write(" → ".join(priorities))
+        st.error("추천에 사용할 수 있는 데이터가 없습니다.")
 
-        # 메틸렌 블루 직접 실험 여부 확인
-        if pollutant.strip().lower() in [
-            "메틸렌 블루",
-            "methylene blue"
-        ]:
+    else:
 
-            st.success(
-                "입력한 물질은 흡광도 실험에 사용한 "
-                "메틸렌 블루와 일치합니다."
-            )
+        # 전체 추천 순위
+        st.subheader("추천 순위")
 
-        else:
+        recommendation_items = []
 
-            st.warning(
-                "현재 흡광도 실험은 메틸렌 블루를 대상으로 했습니다. "
-                "다른 오염물질에 동일한 결과가 나타난다고 "
-                "확정할 수 없습니다."
-            )
+        for index, key in enumerate(ordered[:5]):
+
+            display = key
+
+            for metric in metric_data.values():
+                if key in metric:
+                    display = metric[key]["display"]
+                    break
+
+            recommendation_items.append((key, display))
+
+            st.write(f"**{index + 1}순위:** {display}")
 
         st.divider()
 
-        if not ordered:
+        # 순위별 상세 분석
+        st.subheader("추천 조건 상세 분석")
 
-            st.error("추천에 사용할 수 있는 데이터가 없습니다.")
+        for index, (key, display) in enumerate(
+            recommendation_items
+        ):
 
-        else:
+            with st.expander(
+                f"{index + 1}순위 상세 분석",
+                expanded=(index == 0)
+            ):
 
-            st.subheader("추천 결과")
+                st.markdown(f"**추천 조건:** {display}")
 
-            st.write(
-                "사용자가 설정한 우선순위에 따라 "
-                "실험 조건을 순차적으로 비교한 결과입니다."
-            )
+                # 실험 데이터
+                st.markdown("### 실험 데이터")
 
-            for index, key in enumerate(ordered[:5]):
-
-                display = None
-
-                for metric in metric_data.values():
-
-                    if key in metric:
-                        display = metric[key]["display"]
-                        break
-
-                st.markdown("---")
-
-                if index == 0:
-                    st.markdown("### 🏆 1순위 추천")
-                else:
-                    st.markdown(f"### {index + 1}순위 추천")
-
-                st.write("**추천 조건:**", display)
-
-
-                # 머신러닝 예측 결과 표시
-                st.markdown("**🤖 머신러닝 예측 결과**")
-
-                try:
-                    parts = key.split("|")
-                    seaweed_name = parts[0]
-
-                    if "+" not in seaweed_name:
-                        concentration_value = parts[1] if len(parts) > 1 else ""
-
-                        if concentration_value in [
-                            "저농도", "중농도", "고농도"
-                        ]:
-                            predicted_value = predict_single(
-                                seaweed_name,
-                                concentration_value
-                            )
-
-                            st.write(
-                                f"예측 흡광도: {predicted_value:.3f}"
-                            )
-
-                        else:
-                            st.info(
-                                "농도 정보가 없어 예측하지 않았습니다."
-                            )
-
-                    else:
-                        st.info(
-                            "혼합 조건의 예측은 다음 단계에서 연결합니다."
-                        )
-
-                except Exception as e:
-                    st.warning(f"예측 결과 표시 실패: {e}")
-
-                
-                st.markdown("**정화 기능별 실험 근거**")
-
-                for priority in priorities:
+                for priority in saved_priorities:
 
                     item = metric_data[priority].get(key)
 
                     if item is None:
-
-                        st.write(f"- {priority}: 측정 자료 없음")
+                        st.write(
+                            f"- {priority}: 측정 자료 없음"
+                        )
 
                     elif priority == "흡광도":
 
@@ -620,13 +618,14 @@ if st.button("통합 분석 및 추천하기", type="primary"):
                             st.write("- 흡광도: 측정값 없음")
 
                         else:
-
                             rank = ranks_for_display(
-                                metric_data, priority, key
+                                metric_data,
+                                priority,
+                                key
                             )
 
                             st.write(
-                                f"- 흡광도: {value:.3f} "
+                                f"- 실제 흡광도: {value:.3f} "
                                 f"(측정값 순위 {rank}위)"
                             )
 
@@ -638,9 +637,10 @@ if st.button("통합 분석 및 추천하기", type="primary"):
                             st.write("- 탁도: 측정값 없음")
 
                         else:
-
                             rank = ranks_for_display(
-                                metric_data, priority, key
+                                metric_data,
+                                priority,
+                                key
                             )
 
                             st.write(
@@ -648,303 +648,345 @@ if st.button("통합 분석 및 추천하기", type="primary"):
                                 f"(관찰 점수 순위 {rank}위)"
                             )
 
-
-            # 전체 추천 순위 구성
-            recommendation_items = []
-
-            for key in ordered[:5]:
-                display = None
-
-                for metric in metric_data.values():
-                    if key in metric:
-                        display = metric[key]["display"]
-                        break
-
-                recommendation_items.append((key, display))
-
-            # 전체 추천 순위 표시
-            st.subheader("전체 추천 순위")
-
-            for index, (key, display) in enumerate(
-                recommendation_items
-            ):
-                st.write(
-                    f"**{index + 1}순위:** {display}"
-                )
-
-            st.divider()
-
-            # 순위별 상세 분석
-            st.subheader("추천 조건 상세 분석")
-
-
-for index, (key, display) in enumerate(
-    recommendation_items
-):
-
-    with st.expander(
-        f"{index + 1}순위 상세 분석",
-        expanded=(index == 0)
-    ):
-
-        st.markdown(f"**추천 조건:** {display}")
-
-        st.markdown("### 실험 데이터")
-
-        for priority in priorities:
-
-            item = metric_data[priority].get(key)
-
-            if item is None:
-                st.write(
-                    f"- {priority}: 측정 자료 없음"
-                )
-
-            elif priority == "흡광도":
-
-                value = item["value"]
-
-                if value is None:
-                    st.write("- 흡광도: 측정값 없음")
-
-                else:
-                    rank = ranks_for_display(
-                        metric_data, priority, key
-                    )
-
-                    st.write(
-                        f"- 실제 흡광도: {value:.3f} "
-                        f"(측정값 순위 {rank}위)"
-                    )
-
-            elif priority == "탁도":
-
-                value = item["value"]
-
-                if value is None:
-                    st.write("- 탁도: 측정값 없음")
-
-                else:
-                    rank = ranks_for_display(
-                        metric_data, priority, key
-                    )
-
-                    st.write(
-                        f"- 탁도 관찰 점수: {value:.2f}/8 "
-                        f"(관찰 점수 순위 {rank}위)"
-                    )
-
-            else:
-                st.write(f"- 항균성: {item['value']}")
+                    else:
+                        st.write(
+                            f"- 항균성: {item['value']}"
+                        )
 
                 st.divider()
 
-                    # 머신러닝 예측
+                # 머신러닝 예측
                 st.markdown("### 🤖 머신러닝 분석")
 
                 try:
-                        parts = key.split("|")
-                        seaweed_name = parts[0]
-                        concentration_value = (
-                            parts[1] if len(parts) > 1 else ""
-                        )
 
-                        if (
-                            "+" not in seaweed_name
-                            and concentration_value in [
-                                "저농도", "중농도", "고농도"
-                            ]
-                        ):
+                    parts = key.split("|")
+
+                    seaweed_name = parts[0].strip()
+                    concentration_value = (
+                        parts[1].strip()
+                        if len(parts) > 1 else ""
+                    )
+                    ratio_value = (
+                        parts[2].strip()
+                        if len(parts) > 2 else ""
+                    )
+
+                    predicted_value = None
+
+                    if "+" not in seaweed_name:
+
+                        if concentration_value in [
+                            "저농도",
+                            "중농도",
+                            "고농도"
+                        ]:
 
                             predicted_value = predict_single(
                                 seaweed_name,
                                 concentration_value
                             )
 
-                            st.metric(
-                                "예측 흡광도",
-                                f"{predicted_value:.3f}"
+                        else:
+                            st.info(
+                                "농도 정보가 없어 예측하지 않았습니다."
                             )
 
-                            absorbance_item = metric_data.get(
-                                "흡광도", {}
-                            ).get(key)
+                    else:
 
-                            if (
-                                absorbance_item is not None
-                                and absorbance_item["value"] is not None
-                            ):
+                        mixture_names = [
+                            name.strip()
+                            for name in seaweed_name.split("+")
+                        ]
 
-                                actual_value = absorbance_item["value"]
+                        if (
+                            len(mixture_names) == 2
+                            and ratio_value in ["1:1", "3:1"]
+                        ):
 
-                                st.write(
-                                    f"실제 측정값: {actual_value:.3f}"
-                                )
-
-                                st.write(
-                                    f"예측 절대 오차: "
-                                    f"{abs(absorbance_item['value'] - predicted_value):.3f}"
-                                )
+                            predicted_value = predict_mixture(
+                                mixture_names[0],
+                                mixture_names[1],
+                                ratio_value
+                            )
 
                         else:
                             st.info(
-                                "현재 조건은 단일 해조류 모델의 "
-                                "입력 형식과 일치하지 않아 "
-                                "예측하지 않았습니다."
+                                "혼합 해조류의 이름 또는 혼합비를 "
+                                "확인할 수 없어 예측하지 않았습니다."
                             )
 
-                    except Exception as e:
-                        st.warning(
-                            f"예측 결과 표시 실패: {e}"
+                    if predicted_value is not None:
+
+                        st.metric(
+                            "예측 흡광도",
+                            f"{predicted_value:.3f}"
                         )
 
-                    st.caption(
-                        "머신러닝 예측값은 실제 측정값이 아닌 "
-                        "학습 모델의 추정값입니다."
+                        actual_item = metric_data[
+                            "흡광도"
+                        ].get(key)
+
+                        if (
+                            actual_item is not None
+                            and actual_item["value"] is not None
+                        ):
+
+                            actual_value = actual_item["value"]
+
+                            error = abs(
+                                predicted_value - actual_value
+                            )
+
+                            st.write(
+                                f"실제 측정값: {actual_value:.3f}"
+                            )
+
+                            st.write(
+                                f"예측값과 실제값의 절대 차이: "
+                                f"{error:.3f}"
+                            )
+
+                except Exception as e:
+
+                    st.warning(
+                        f"머신러닝 예측 결과를 표시하지 못했습니다: {e}"
                     )
 
-            st.divider()
-
-            st.subheader("추천 판단 기준")
-
-            for i, priority in enumerate(priorities, start=1):
-                st.write(
-                    f"{i}순위 기준: {priority}"
+                st.caption(
+                    "머신러닝 예측값은 학습된 모델의 추정값이며 "
+                    "실제 실험 측정값과 구분해야 합니다."
                 )
 
-            st.info(
-                "흡광도와 탁도는 각각의 측정 방향에 따라 "
-                "비교했습니다. 항균성은 억제환 관찰 여부만 "
-                "구분했습니다. 서로 다른 지표를 하나의 "
-                "수치로 합산하지 않았습니다."
-            )
-
-            st.warning(
-                "추천 결과는 현재 실험 데이터에 기반한 "
-                "조건 비교입니다. 실험하지 않은 오염물질이나 "
-                "조건의 효과를 보장하지 않습니다."
-            )
-
-        
-        # =================================
-        # 10. 문헌 자료
-        # =================================
         st.divider()
-        st.subheader("문헌 근거")
 
-        literature = data["Literature"]
+        # 추천 판단 기준
+        st.subheader("추천 판단 기준")
 
-        if literature.empty:
+        for i, priority in enumerate(
+            saved_priorities,
+            start=1
+        ):
+            st.write(f"{i}순위 기준: {priority}")
 
-            st.info(
-                "현재 등록된 문헌 자료가 없습니다. "
-                "따라서 이번 결과에는 문헌 기반 추천이 포함되지 않았습니다."
-            )
+        st.info(
+            "흡광도는 낮을수록, 탁도 관찰 점수는 높을수록 "
+            "우선적으로 비교했습니다. "
+            "항균성은 억제환 관찰 여부로 구분했습니다. "
+            "서로 다른 지표를 하나의 수치로 합산하지 않았습니다."
+        )
 
-        else:
+        st.warning(
+            "추천 결과는 현재 확보한 실험 데이터에 기반한 "
+            "조건 비교입니다. 실험하지 않은 오염물질이나 "
+            "조건의 정화 효과를 보장하지 않습니다."
+        )
 
-            st.write(
-                "등록된 문헌 자료입니다. "
-                "실험 결과와 문헌 결과는 구분해서 해석해야 합니다."
-            )
 
-            st.dataframe(
-                literature,
-                use_container_width=True
-            )
-
-import json
-import urllib.parse
-import urllib.request
-import urllib.error
+# =====================================
+# 10. 논문 검색 (OpenAlex)
+# =====================================
 
 st.divider()
-st.header("📚 실시간 해외 논문 검색")
+st.header("4. 관련 논문 검색")
 
-st.write("오염물질과 해조류 관련 연구 논문을 OpenAlex에서 검색합니다.")
-
-search_keyword = st.text_input(
-    "검색할 연구 주제",
-    placeholder="예: methylene blue seaweed"
+st.write(
+    "OpenAlex를 이용해 해조류, 수질 정화, "
+    "흡착 및 항균성과 관련된 학술 자료를 검색합니다."
 )
 
-if st.button("논문 검색하기"):
-    if not search_keyword.strip():
-        st.warning("검색어를 입력해 주세요.")
+literature_query = st.text_input(
+    "논문 검색어",
+    placeholder="예: seaweed water purification"
+)
+
+if st.button("논문 검색"):
+
+    if not literature_query.strip():
+
+        st.warning("검색어를 입력해 줘.")
+
     else:
+
+        import json
+        import urllib.parse
+        import urllib.request
+        import urllib.error
+
         try:
+
             api_key = st.secrets["OPENALEX_API_KEY"]
 
             params = urllib.parse.urlencode({
-                "search": search_keyword,
+                "search": literature_query,
                 "per-page": 5,
                 "api_key": api_key
             })
 
-            url = "https://api.openalex.org/works?" + params
+            url = (
+                "https://api.openalex.org/works?"
+                + params
+            )
 
             request = urllib.request.Request(
                 url,
-                headers={"User-Agent": "SeaweedWaterPurificationAI"}
+                headers={
+                    "User-Agent": "SeaweedWaterPurificationAI/1.0"
+                }
             )
 
-            with urllib.request.urlopen(request, timeout=20) as response:
-                result = json.loads(response.read().decode("utf-8"))
+            with urllib.request.urlopen(
+                request,
+                timeout=20
+            ) as response:
 
-            papers = result.get("results", [])
+                search_data = json.loads(
+                    response.read().decode("utf-8")
+                )
+
+            papers = search_data.get("results", [])
 
             if not papers:
+
                 st.info("검색 결과가 없습니다.")
 
-            for paper in papers:
-                st.subheader(paper.get("title", "제목 없음"))
+            else:
 
-                authors = paper.get("authorships", [])
-                author_names = [
-                    a.get("author", {}).get("display_name", "")
-                    for a in authors[:5]
-                ]
+                st.success(
+                    f"{len(papers)}개의 논문을 찾았습니다."
+                )
 
-                st.write("저자:", ", ".join(author_names) or "정보 없음")
-                st.write("출판 연도:", paper.get("publication_year", "정보 없음"))
-                st.write("DOI:", paper.get("doi") or "정보 없음")
+                for paper in papers:
 
-                abstract_index = paper.get("abstract_inverted_index")
-                if abstract_index:
-                    words = [
-                        (position, word)
-                        for word, positions in abstract_index.items()
-                        for position in positions
-                    ]
-                    abstract = " ".join(
-                        word for position, word in sorted(words)
+                    st.divider()
+
+                    st.markdown(
+                        "### " + paper.get(
+                            "title",
+                            "제목 정보 없음"
+                        )
                     )
-                    st.write("초록:", abstract)
-                else:
-                    st.write("초록: 제공되지 않음")
 
-                st.divider()
+                    authors = paper.get(
+                        "authorships",
+                        []
+                    )
+
+                    author_names = [
+                        a.get("author", {}).get(
+                            "display_name",
+                            ""
+                        )
+                        for a in authors[:5]
+                    ]
+
+                    st.write(
+                        "저자:",
+                        ", ".join(author_names) or "정보 없음"
+                    )
+
+                    st.write(
+                        "출판 연도:",
+                        paper.get(
+                            "publication_year",
+                            "정보 없음"
+                        )
+                    )
+
+                    st.write(
+                        "DOI:",
+                        paper.get("doi") or "정보 없음"
+                    )
+
+                    if paper.get("doi"):
+
+                        st.markdown(
+                            f"[논문 원문 링크]({paper['doi']})"
+                        )
+
+                    abstract_index = paper.get(
+                        "abstract_inverted_index"
+                    )
+
+                    if abstract_index:
+
+                        words = [
+                            (position, word)
+                            for word, positions
+                            in abstract_index.items()
+                            for position in positions
+                        ]
+
+                        abstract = " ".join(
+                            word
+                            for position, word
+                            in sorted(words)
+                        )
+
+                        st.write("초록:", abstract)
+
+                    else:
+
+                        st.write("초록: 제공되지 않음")
 
         except KeyError:
-            st.error("Streamlit Secrets에서 API 키를 찾을 수 없습니다.")
+
+            st.error(
+                "Streamlit Secrets에서 OPENALEX_API_KEY를 "
+                "찾을 수 없습니다."
+            )
+
         except urllib.error.HTTPError as e:
-            st.error(f"OpenAlex 검색 오류: HTTP {e.code}")
+
+            st.error(
+                f"OpenAlex 검색 오류: HTTP {e.code}"
+            )
+
         except Exception as e:
-            st.error(f"검색 중 오류가 발생했습니다: {e}")
+
+            st.error(
+                f"검색 중 오류가 발생했습니다: {e}"
+            )
+
+
+# 데이터베이스에 저장된 문헌 정보
+with st.expander("데이터베이스에 저장된 문헌 정보"):
+
+    literature_df = data["Literature"]
+
+    if literature_df.empty:
+
+        st.info("저장된 문헌 정보가 없습니다.")
+
+    else:
+
+        st.dataframe(
+            literature_df,
+            use_container_width=True
+        )
 
 
 # =====================================
 # 11. 데이터베이스 정보
 # =====================================
+
+st.divider()
+st.header("5. 데이터베이스 정보")
+
 with st.expander("사용 중인 데이터베이스 확인"):
 
     for name, df in data.items():
 
         st.write(f"**{name}:** {len(df)}개 행")
-        
+
+        st.dataframe(
+            df,
+            use_container_width=True
+        )
+
 
 # =====================================
-# 12. 머신러닝 흡광도 예측
+# 12. 별도 머신러닝 흡광도 예측
 # =====================================
 
 st.divider()
@@ -961,6 +1003,7 @@ prediction_type = st.radio(
     horizontal=True
 )
 
+
 if prediction_type == "단일 해조류":
 
     selected_seaweed = st.selectbox(
@@ -975,15 +1018,24 @@ if prediction_type == "단일 해조류":
 
     if st.button("단일 해조류 흡광도 예측"):
 
-        prediction = predict_single(
-            selected_seaweed,
-            selected_concentration
-        )
+        try:
 
-        st.metric(
-            "예측 흡광도",
-            f"{prediction:.3f}"
-        )
+            prediction = predict_single(
+                selected_seaweed,
+                selected_concentration
+            )
+
+            st.metric(
+                "예측 흡광도",
+                f"{prediction:.3f}"
+            )
+
+        except Exception as e:
+
+            st.error(
+                f"예측에 실패했습니다: {e}"
+            )
+
 
 else:
 
@@ -994,13 +1046,15 @@ else:
     )
 
     seaweed2_options = [
-        name for name in SEAWEEDS
+        name
+        for name in SEAWEEDS
         if name != seaweed1
     ]
 
     seaweed2 = st.selectbox(
         "두 번째 해조류",
-        seaweed2_options
+        seaweed2_options,
+        key="mixture_seaweed2"
     )
 
     ratio = st.selectbox(
@@ -1010,16 +1064,25 @@ else:
 
     if st.button("혼합 해조류 흡광도 예측"):
 
-        prediction = predict_mixture(
-            seaweed1,
-            seaweed2,
-            ratio
-        )
+        try:
 
-        st.metric(
-            "예측 흡광도",
-            f"{prediction:.3f}"
-        )
+            prediction = predict_mixture(
+                seaweed1,
+                seaweed2,
+                ratio
+            )
+
+            st.metric(
+                "예측 흡광도",
+                f"{prediction:.3f}"
+            )
+
+        except Exception as e:
+
+            st.error(
+                f"예측에 실패했습니다: {e}"
+            )
+
 
 st.caption(
     "주의: 예측값은 현재 보유한 실험 데이터로 학습한 모델의 추정값입니다. "
