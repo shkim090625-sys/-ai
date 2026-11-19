@@ -742,7 +742,7 @@ for index, (key, display) in enumerate(
                     # 머신러닝 예측
                 st.markdown("### 🤖 머신러닝 분석")
 
-                    try:
+                try:
                         parts = key.split("|")
                         seaweed_name = parts[0]
                         concentration_value = (
